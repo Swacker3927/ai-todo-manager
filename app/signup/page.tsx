@@ -5,7 +5,11 @@ import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { Sparkles } from "lucide-react";
+
+import { createClient } from "@/lib/supabase/client";
+import { useAuth } from "@/hooks/use-auth";
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -53,6 +57,18 @@ export default function SignupPage() {
   const [isLoading, setIsLoading] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
   const [success, setSuccess] = React.useState(false);
+  const [requiresEmailConfirmation, setRequiresEmailConfirmation] =
+    React.useState(false);
+  const { user, loading } = useAuth();
+  const router = useRouter();
+  const supabase = createClient();
+
+  // 이미 로그인된 사용자는 메인 페이지로 리다이렉트
+  React.useEffect(() => {
+    if (!loading && user) {
+      router.push("/");
+    }
+  }, [user, loading, router]);
 
   const form = useForm<SignupFormValues>({
     resolver: zodResolver(signupFormSchema),
@@ -63,35 +79,80 @@ export default function SignupPage() {
     },
   });
 
+  const getErrorMessage = (error: unknown): string => {
+    if (!error) return "회원가입 중 오류가 발생했습니다. 다시 시도해주세요.";
+
+    const errorMessage =
+      error instanceof Error
+        ? error.message
+        : typeof error === "string"
+          ? error
+          : String(error);
+
+    // 사용자 친화적인 오류 메시지로 변환
+    if (errorMessage.includes("User already registered")) {
+      return "이미 등록된 이메일입니다. 로그인 페이지로 이동해주세요.";
+    }
+    if (errorMessage.includes("Password")) {
+      return "비밀번호가 요구사항을 만족하지 않습니다.";
+    }
+    if (errorMessage.includes("Email")) {
+      return "올바른 이메일 형식이 아닙니다.";
+    }
+    if (errorMessage.includes("network") || errorMessage.includes("fetch")) {
+      return "네트워크 오류가 발생했습니다. 인터넷 연결을 확인해주세요.";
+    }
+
+    return errorMessage || "회원가입 중 오류가 발생했습니다. 다시 시도해주세요.";
+  };
+
   const onSubmit = async (values: SignupFormValues) => {
     setIsLoading(true);
     setError(null);
 
     try {
-      // TODO: Supabase Auth 회원가입 로직 구현
-      console.log("Signup attempt:", values);
+      const { data, error: signUpError } = await supabase.auth.signUp({
+        email: values.email,
+        password: values.password,
+      });
 
-      // 임시: 실제 회원가입 로직이 구현되면 제거
-      await new Promise((resolve) => setTimeout(resolve, 1000));
+      if (signUpError) {
+        throw signUpError;
+      }
 
       // 회원가입 성공
-      setSuccess(true);
-
-      // 이메일 인증이 필요한 경우 안내 메시지 표시
-      // 로그인 페이지로 리다이렉트
-      // setTimeout(() => {
-      //   window.location.href = "/login";
-      // }, 2000);
+      if (data.user) {
+        // 세션이 있으면 즉시 로그인된 상태 (이메일 인증 비활성화)
+        if (data.session) {
+          // 메인 페이지로 리다이렉트
+          router.push("/");
+          router.refresh();
+        } else {
+          // 세션이 없으면 이메일 인증이 필요한 상태
+          setRequiresEmailConfirmation(true);
+          setSuccess(true);
+        }
+      } else {
+        throw new Error("회원가입에 실패했습니다. 다시 시도해주세요.");
+      }
     } catch (err) {
-      setError(
-        err instanceof Error
-          ? err.message
-          : "회원가입 중 오류가 발생했습니다. 다시 시도해주세요."
-      );
+      setError(getErrorMessage(err));
     } finally {
       setIsLoading(false);
     }
   };
+
+  // 로딩 중이거나 이미 로그인된 사용자는 로딩 표시
+  if (loading || user) {
+    return (
+      <div className="flex min-h-screen items-center justify-center">
+        <div className="text-center">
+          <div className="mb-4 inline-block size-8 animate-spin rounded-full border-4 border-solid border-primary border-r-transparent"></div>
+          <p className="text-muted-foreground">로딩 중...</p>
+        </div>
+      </div>
+    );
+  }
 
   if (success) {
     return (
@@ -106,16 +167,31 @@ export default function SignupPage() {
               </div>
               <CardTitle className="text-2xl">회원가입 완료!</CardTitle>
               <CardDescription>
-                회원가입이 완료되었습니다. 이메일 인증을 확인해주세요.
+                {requiresEmailConfirmation
+                  ? "회원가입이 완료되었습니다. 이메일 인증을 확인해주세요."
+                  : "회원가입이 완료되었습니다."}
               </CardDescription>
             </CardHeader>
             <CardContent className="space-y-4">
-              <p className="text-sm text-muted-foreground text-center">
-                이메일로 인증 링크를 보내드렸습니다. 이메일을 확인하고 인증을 완료해주세요.
-              </p>
-              <Button asChild className="w-full">
-                <Link href="/login">로그인 페이지로 이동</Link>
-              </Button>
+              {requiresEmailConfirmation ? (
+                <>
+                  <p className="text-sm text-muted-foreground text-center">
+                    이메일로 인증 링크를 보내드렸습니다. 이메일을 확인하고 인증을 완료해주세요.
+                  </p>
+                  <Button asChild className="w-full">
+                    <Link href="/login">로그인 페이지로 이동</Link>
+                  </Button>
+                </>
+              ) : (
+                <>
+                  <p className="text-sm text-muted-foreground text-center">
+                    환영합니다! 메인 페이지로 이동합니다.
+                  </p>
+                  <Button asChild className="w-full">
+                    <Link href="/">메인 페이지로 이동</Link>
+                  </Button>
+                </>
+              )}
             </CardContent>
           </Card>
         </div>
@@ -261,4 +337,3 @@ export default function SignupPage() {
     </div>
   );
 }
-

@@ -74,6 +74,15 @@ export function TodoForm({
   const [selectedCategories, setSelectedCategories] = React.useState<string[]>(
     todo?.category || []
   );
+  const [selectedTime, setSelectedTime] = React.useState<string>(() => {
+    if (todo?.due_date) {
+      const date = new Date(todo.due_date);
+      const hours = date.getHours().toString().padStart(2, "0");
+      const minutes = date.getMinutes().toString().padStart(2, "0");
+      return `${hours}:${minutes}`;
+    }
+    return "09:00";
+  });
 
   const form = useForm<TodoFormValues>({
     resolver: zodResolver(todoFormSchema),
@@ -88,10 +97,19 @@ export function TodoForm({
   });
 
   const handleSubmit = async (values: TodoFormValues) => {
+    let dueDate: Date | null = values.due_date || null;
+    
+    // 날짜가 선택된 경우 시간을 추가
+    if (dueDate && selectedTime) {
+      const [hours, minutes] = selectedTime.split(":").map(Number);
+      dueDate = new Date(dueDate);
+      dueDate.setHours(hours, minutes, 0, 0);
+    }
+    
     const formData: TodoFormData = {
       title: values.title,
       description: values.description || undefined,
-      due_date: values.due_date || null,
+      due_date: dueDate,
       priority: values.priority,
       category: selectedCategories.length > 0 ? selectedCategories : undefined,
       completed: values.completed,
@@ -154,41 +172,52 @@ export function TodoForm({
             render={({ field }) => (
               <FormItem className="flex flex-col">
                 <FormLabel>마감일</FormLabel>
-                <Popover>
-                  <PopoverTrigger asChild>
-                    <FormControl>
-                      <Button
-                        variant="outline"
-                        className={cn(
-                          "w-full justify-start text-left font-normal",
-                          !field.value && "text-muted-foreground"
-                        )}
-                        disabled={isLoading}
-                        type="button"
-                      >
-                        <CalendarIcon className="mr-2 size-4" />
-                        {field.value ? (
-                          format(field.value, "yyyy년 MM월 dd일", {
-                            locale: ko,
-                          })
-                        ) : (
-                          <span>날짜 선택</span>
-                        )}
-                      </Button>
-                    </FormControl>
-                  </PopoverTrigger>
-                  <PopoverContent className="w-auto p-0" align="start">
-                    <Calendar
-                      mode="single"
-                      selected={field.value || undefined}
-                      onSelect={(date) => field.onChange(date || null)}
-                      disabled={(date) => date < new Date(new Date().setHours(0, 0, 0, 0))}
-                      initialFocus
+                <div className="flex gap-2">
+                  <Popover>
+                    <PopoverTrigger asChild>
+                      <FormControl>
+                        <Button
+                          variant="outline"
+                          className={cn(
+                            "flex-1 justify-start text-left font-normal",
+                            !field.value && "text-muted-foreground"
+                          )}
+                          disabled={isLoading}
+                          type="button"
+                        >
+                          <CalendarIcon className="mr-2 size-4" />
+                          {field.value ? (
+                            format(field.value, "yyyy년 MM월 dd일", {
+                              locale: ko,
+                            })
+                          ) : (
+                            <span>날짜 선택</span>
+                          )}
+                        </Button>
+                      </FormControl>
+                    </PopoverTrigger>
+                    <PopoverContent className="w-auto p-0" align="start">
+                      <Calendar
+                        mode="single"
+                        selected={field.value || undefined}
+                        onSelect={(date) => field.onChange(date || null)}
+                        disabled={(date) => date < new Date(new Date().setHours(0, 0, 0, 0))}
+                        initialFocus
+                      />
+                    </PopoverContent>
+                  </Popover>
+                  {field.value && (
+                    <Input
+                      type="time"
+                      value={selectedTime}
+                      onChange={(e) => setSelectedTime(e.target.value)}
+                      className="w-32"
+                      disabled={isLoading}
                     />
-                  </PopoverContent>
-                </Popover>
+                  )}
+                </div>
                 <FormDescription>
-                  마감일을 선택하세요 (선택사항)
+                  마감일과 시간을 선택하세요 (선택사항)
                 </FormDescription>
                 <FormMessage />
               </FormItem>

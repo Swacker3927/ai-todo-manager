@@ -3,6 +3,10 @@
 import * as React from "react";
 import { Sparkles, LogOut, Search, Filter, User } from "lucide-react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
+
+import { createClient } from "@/lib/supabase/client";
+import { useAuth } from "@/hooks/use-auth";
 
 import { type Todo, type TodoFormData, type TodoPriority } from "@/types/todo";
 import { TodoForm, TodoList } from "@/components/todo";
@@ -26,80 +30,82 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
-import { cn } from "@/lib/utils";
-
-// Mock 데이터
-const mockUser = {
-  id: "user-1",
-  email: "user@example.com",
-  name: "사용자",
-};
-
-const mockTodos: Todo[] = [
-  {
-    id: "1",
-    user_id: "user-1",
-    title: "프로젝트 기획서 작성",
-    description: "다음 주까지 완료해야 하는 중요한 프로젝트 기획서",
-    created_date: new Date().toISOString(),
-    due_date: new Date(Date.now() + 2 * 24 * 60 * 60 * 1000).toISOString(),
-    priority: "high",
-    category: ["업무"],
-    completed: false,
-    updated_at: new Date().toISOString(),
-  },
-  {
-    id: "2",
-    user_id: "user-1",
-    title: "운동하기",
-    description: "저녁에 헬스장 가기",
-    created_date: new Date().toISOString(),
-    due_date: new Date(Date.now() + 1 * 24 * 60 * 60 * 1000).toISOString(),
-    priority: "medium",
-    category: ["건강"],
-    completed: false,
-    updated_at: new Date().toISOString(),
-  },
-  {
-    id: "3",
-    user_id: "user-1",
-    title: "React 학습",
-    description: "Next.js App Router 공부하기",
-    created_date: new Date().toISOString(),
-    due_date: new Date(Date.now() - 1 * 24 * 60 * 60 * 1000).toISOString(),
-    priority: "low",
-    category: ["학습"],
-    completed: false,
-    updated_at: new Date().toISOString(),
-  },
-  {
-    id: "4",
-    user_id: "user-1",
-    title: "회의 준비",
-    description: "내일 오전 회의 자료 준비",
-    created_date: new Date().toISOString(),
-    due_date: null,
-    priority: "high",
-    category: ["업무"],
-    completed: true,
-    updated_at: new Date().toISOString(),
-  },
-];
 
 type FilterStatus = "all" | "진행 중" | "완료" | "지연";
-type SortOption = "priority" | "due_date" | "created_date";
+type SortOption = "priority" | "due_date" | "created_date" | "title";
 
 export default function HomePage() {
-  const [todos, setTodos] = React.useState<Todo[]>(mockTodos);
+  const { user, loading } = useAuth();
+  const router = useRouter();
+  const supabase = createClient();
+
+  const [todos, setTodos] = React.useState<Todo[]>([]);
+  const [todosLoading, setTodosLoading] = React.useState(true);
+  const [error, setError] = React.useState<string | null>(null);
   const [searchQuery, setSearchQuery] = React.useState("");
   const [filterStatus, setFilterStatus] = React.useState<FilterStatus>("all");
   const [filterPriority, setFilterPriority] = React.useState<
     TodoPriority | "all"
   >("all");
-  const [sortOption, setSortOption] = React.useState<SortOption>("priority");
+  const [sortOption, setSortOption] = React.useState<SortOption>("created_date");
   const [editingTodo, setEditingTodo] = React.useState<Todo | null>(null);
 
-  // 검색 필터링
+  // 할 일 목록 조회
+  const fetchTodos = React.useCallback(async () => {
+    if (!user) return;
+
+    try {
+      setTodosLoading(true);
+      setError(null);
+
+      const { data, error: fetchError } = await supabase
+        .from("todos")
+        .select("*")
+        .eq("user_id", user.id)
+        .order("created_date", { ascending: false });
+
+      if (fetchError) {
+        throw fetchError;
+      }
+
+      setTodos(data || []);
+    } catch (err) {
+      console.error("할 일 조회 오류:", err);
+      const errorMessage =
+        err instanceof Error
+          ? err.message
+          : "할 일을 불러오는 중 오류가 발생했습니다.";
+      setError(errorMessage);
+      
+      // 인증 오류인 경우 로그인 페이지로 리다이렉트
+      if (
+        errorMessage.includes("JWT") ||
+        errorMessage.includes("authentication") ||
+        errorMessage.includes("unauthorized")
+      ) {
+        alert("인증이 만료되었습니다. 다시 로그인해주세요.");
+        router.push("/login");
+      }
+    } finally {
+      setTodosLoading(false);
+    }
+  }, [user, supabase, router]);
+
+  // 사용자가 로그인되면 할 일 목록 조회
+  React.useEffect(() => {
+    if (user) {
+      fetchTodos();
+    }
+  }, [user, fetchTodos]);
+
+  // 인증되지 않은 사용자는 로그인 페이지로 리다이렉트
+  React.useEffect(() => {
+    if (!loading && !user) {
+      router.push("/login");
+    }
+  }, [user, loading, router]);
+
+  // 검색 필터링 (early return 전에 정의)
   const filteredTodos = React.useMemo(() => {
     let result = [...todos];
 
@@ -151,60 +157,174 @@ export default function HomePage() {
           new Date(b.created_date).getTime() - new Date(a.created_date).getTime()
         );
       }
+      if (sortOption === "title") {
+        return a.title.localeCompare(b.title, "ko");
+      }
       return 0;
     });
 
     return result;
   }, [todos, searchQuery, filterStatus, filterPriority, sortOption]);
 
+  // 로딩 중이거나 사용자가 없으면 로딩 표시
+  if (loading || todosLoading) {
+    return (
+      <div className="flex min-h-screen items-center justify-center">
+        <div className="text-center">
+          <div className="mb-4 inline-block size-8 animate-spin rounded-full border-4 border-solid border-primary border-r-transparent"></div>
+          <p className="text-muted-foreground">로딩 중...</p>
+        </div>
+      </div>
+    );
+  }
+
+  // 사용자가 없으면 아무것도 렌더링하지 않음 (리다이렉트 중)
+  if (!user) {
+    return null;
+  }
+
   const handleAddTodo = async (data: TodoFormData) => {
-    const newTodo: Todo = {
-      id: `todo-${Date.now()}`,
-      user_id: mockUser.id,
-      title: data.title,
-      description: data.description || null,
-      created_date: new Date().toISOString(),
-      due_date: data.due_date?.toISOString() || null,
-      priority: data.priority || null,
-      category: data.category || null,
-      completed: data.completed || false,
-      updated_at: new Date().toISOString(),
-    };
-    setTodos([...todos, newTodo]);
-    setEditingTodo(null);
+    if (!user) return;
+
+    try {
+      setError(null);
+
+      const { data: newTodo, error: insertError } = await supabase
+        .from("todos")
+        .insert({
+          user_id: user.id,
+          title: data.title,
+          description: data.description || null,
+          due_date: data.due_date?.toISOString() || null,
+          priority: data.priority || null,
+          category: data.category || null,
+          completed: data.completed || false,
+        })
+        .select()
+        .single();
+
+      if (insertError) {
+        throw insertError;
+      }
+
+      if (newTodo) {
+        // 목록 새로고침
+        await fetchTodos();
+        setEditingTodo(null);
+      }
+    } catch (err) {
+      console.error("할 일 생성 오류:", err);
+      const errorMessage =
+        err instanceof Error
+          ? err.message
+          : "할 일을 생성하는 중 오류가 발생했습니다.";
+      setError(errorMessage);
+      alert(errorMessage);
+    }
   };
 
   const handleEditTodo = async (data: TodoFormData) => {
-    if (!editingTodo) return;
+    if (!editingTodo || !user) return;
 
-    const updatedTodos = todos.map((todo) =>
-      todo.id === editingTodo.id
-        ? {
-            ...todo,
-            title: data.title,
-            description: data.description || null,
-            due_date: data.due_date?.toISOString() || null,
-            priority: data.priority || null,
-            category: data.category || null,
-            completed: data.completed || false,
-            updated_at: new Date().toISOString(),
-          }
-        : todo
-    );
-    setTodos(updatedTodos);
-    setEditingTodo(null);
+    try {
+      setError(null);
+
+      const { error: updateError } = await supabase
+        .from("todos")
+        .update({
+          title: data.title,
+          description: data.description || null,
+          due_date: data.due_date?.toISOString() || null,
+          priority: data.priority || null,
+          category: data.category || null,
+          completed: data.completed || false,
+          updated_at: new Date().toISOString(),
+        })
+        .eq("id", editingTodo.id)
+        .eq("user_id", user.id); // 본인 소유만 수정 가능
+
+      if (updateError) {
+        throw updateError;
+      }
+
+      // 목록 새로고침
+      await fetchTodos();
+      setEditingTodo(null);
+    } catch (err) {
+      console.error("할 일 수정 오류:", err);
+      const errorMessage =
+        err instanceof Error
+          ? err.message
+          : "할 일을 수정하는 중 오류가 발생했습니다.";
+      setError(errorMessage);
+      alert(errorMessage);
+    }
   };
 
-  const handleDeleteTodo = (id: string) => {
-    setTodos(todos.filter((todo) => todo.id !== id));
+  const handleDeleteTodo = async (id: string) => {
+    if (!user) return;
+
+    // 확인창 표시
+    if (!confirm("정말로 이 할 일을 삭제하시겠습니까?")) {
+      return;
+    }
+
+    try {
+      setError(null);
+
+      const { error: deleteError } = await supabase
+        .from("todos")
+        .delete()
+        .eq("id", id)
+        .eq("user_id", user.id); // 본인 소유만 삭제 가능
+
+      if (deleteError) {
+        throw deleteError;
+      }
+
+      // 목록 새로고침
+      await fetchTodos();
+    } catch (err) {
+      console.error("할 일 삭제 오류:", err);
+      const errorMessage =
+        err instanceof Error
+          ? err.message
+          : "할 일을 삭제하는 중 오류가 발생했습니다.";
+      setError(errorMessage);
+      alert(errorMessage);
+    }
   };
 
-  const handleToggleComplete = (id: string, completed: boolean) => {
-    setTodos(
-      todos.map((todo) =>
-        todo.id === id ? { ...todo, completed, updated_at: new Date().toISOString() } : todo
-      )
-    );
+  const handleToggleComplete = async (id: string, completed: boolean) => {
+    if (!user) return;
+
+    try {
+      setError(null);
+
+      const { error: updateError } = await supabase
+        .from("todos")
+        .update({
+          completed,
+          updated_at: new Date().toISOString(),
+        })
+        .eq("id", id)
+        .eq("user_id", user.id); // 본인 소유만 수정 가능
+
+      if (updateError) {
+        throw updateError;
+      }
+
+      // 목록 새로고침
+      await fetchTodos();
+    } catch (err) {
+      console.error("완료 상태 변경 오류:", err);
+      const errorMessage =
+        err instanceof Error
+          ? err.message
+          : "완료 상태를 변경하는 중 오류가 발생했습니다.";
+      setError(errorMessage);
+      alert(errorMessage);
+    }
   };
 
   const handleEdit = (todo: Todo) => {
@@ -215,10 +335,24 @@ export default function HomePage() {
     setEditingTodo(null);
   };
 
-  const handleLogout = () => {
-    // TODO: Supabase Auth 로그아웃 로직 구현
-    console.log("Logout");
-    // window.location.href = "/login";
+  const handleLogout = async () => {
+    try {
+      const { error } = await supabase.auth.signOut();
+
+      if (error) {
+        console.error("로그아웃 오류:", error);
+        // 사용자에게 오류 메시지 표시 (선택사항: toast 등 사용 가능)
+        alert("로그아웃 중 오류가 발생했습니다. 다시 시도해주세요.");
+        return;
+      }
+
+      // 로그아웃 성공 시 로그인 페이지로 이동
+      router.push("/login");
+      router.refresh();
+    } catch (err) {
+      console.error("로그아웃 오류:", err);
+      alert("로그아웃 중 오류가 발생했습니다. 다시 시도해주세요.");
+    }
   };
 
   return (
@@ -244,14 +378,18 @@ export default function HomePage() {
                       <User className="size-4" />
                     </AvatarFallback>
                   </Avatar>
-                  <span className="hidden sm:inline-block">{mockUser.email}</span>
+                  <span className="hidden sm:inline-block">
+                    {user.email || "사용자"}
+                  </span>
                 </Button>
               </DropdownMenuTrigger>
               <DropdownMenuContent align="end" className="w-56">
                 <DropdownMenuLabel>
                   <div className="flex flex-col space-y-1">
-                    <p className="text-sm font-medium">{mockUser.name}</p>
-                    <p className="text-xs text-muted-foreground">{mockUser.email}</p>
+                    <p className="text-sm font-medium">
+                      {user.user_metadata?.name || user.email?.split("@")[0] || "사용자"}
+                    </p>
+                    <p className="text-xs text-muted-foreground">{user.email}</p>
                   </div>
                 </DropdownMenuLabel>
                 <DropdownMenuSeparator />
@@ -268,6 +406,14 @@ export default function HomePage() {
       {/* Main Content */}
       <main className="container flex-1 px-4 py-6">
         <div className="flex flex-col gap-6">
+          {/* Error Message */}
+          {error && (
+            <div className="rounded-md bg-destructive/10 border border-destructive/20 p-4 text-sm text-destructive">
+              <p className="font-medium">오류가 발생했습니다</p>
+              <p className="mt-1">{error}</p>
+            </div>
+          )}
+
           {/* Toolbar */}
           <div className="flex flex-col gap-4 rounded-lg border bg-card p-4">
             <div className="flex items-center gap-2">
@@ -334,6 +480,7 @@ export default function HomePage() {
                   <SelectItem value="priority">우선순위순</SelectItem>
                   <SelectItem value="due_date">마감일순</SelectItem>
                   <SelectItem value="created_date">생성일순</SelectItem>
+                  <SelectItem value="title">제목순</SelectItem>
                 </SelectContent>
               </Select>
             </div>
@@ -384,7 +531,7 @@ export default function HomePage() {
           {/* Main Area */}
           <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
             {/* TodoForm */}
-            <div className="space-y-4">
+            <div className="space-y-4" data-todo-form>
               <div className="flex items-center gap-2">
                 <h2 className="text-xl font-semibold">
                   {editingTodo ? "할 일 수정" : "할 일 추가"}
