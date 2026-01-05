@@ -6,7 +6,7 @@ import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
 import { format } from "date-fns";
 import { ko } from "date-fns/locale";
-import { CalendarIcon } from "lucide-react";
+import { CalendarIcon, Sparkles, Loader2 } from "lucide-react";
 
 import { type Todo, type TodoFormData, type TodoPriority } from "@/types/todo";
 import { Button } from "@/components/ui/button";
@@ -83,6 +83,11 @@ export function TodoForm({
     }
     return "09:00";
   });
+  
+  // AI 기반 할 일 생성 상태
+  const [aiInput, setAiInput] = React.useState("");
+  const [isGenerating, setIsGenerating] = React.useState(false);
+  const [aiError, setAiError] = React.useState<string | null>(null);
 
   const form = useForm<TodoFormValues>({
     resolver: zodResolver(todoFormSchema),
@@ -125,9 +130,139 @@ export function TodoForm({
     );
   };
 
+  // AI 기반 할 일 생성
+  const handleGenerateWithAI = async () => {
+    if (!aiInput.trim()) {
+      setAiError("자연어 입력을 입력해주세요.");
+      return;
+    }
+
+    setIsGenerating(true);
+    setAiError(null);
+
+    try {
+      const response = await fetch("/api/generate-todo", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ text: aiInput }),
+      });
+
+      const result = await response.json();
+
+      if (!response.ok) {
+        throw new Error(result.error || "할 일 생성에 실패했습니다.");
+      }
+
+      if (!result.success || !result.data) {
+        throw new Error("올바른 응답을 받지 못했습니다.");
+      }
+
+      const data = result.data;
+
+      // 날짜 파싱
+      let dueDate: Date | null = null;
+      if (data.due_date) {
+        const [year, month, day] = data.due_date.split("-").map(Number);
+        dueDate = new Date(year, month - 1, day);
+        
+        // 시간 추가
+        if (data.due_time) {
+          const [hours, minutes] = data.due_time.split(":").map(Number);
+          dueDate.setHours(hours, minutes, 0, 0);
+          setSelectedTime(data.due_time);
+        } else {
+          setSelectedTime("09:00");
+          dueDate.setHours(9, 0, 0, 0);
+        }
+      }
+
+      // 폼에 데이터 채우기
+      form.setValue("title", data.title || "");
+      if (data.description) {
+        form.setValue("description", data.description);
+      }
+      if (dueDate) {
+        form.setValue("due_date", dueDate);
+      }
+      if (data.priority) {
+        form.setValue("priority", data.priority as TodoPriority);
+      }
+      if (data.category && data.category.length > 0) {
+        setSelectedCategories(data.category);
+        form.setValue("category", data.category);
+      }
+
+      // 성공 후 입력 필드 초기화
+      setAiInput("");
+    } catch (error) {
+      console.error("AI 할 일 생성 오류:", error);
+      setAiError(
+        error instanceof Error
+          ? error.message
+          : "할 일 생성 중 오류가 발생했습니다."
+      );
+    } finally {
+      setIsGenerating(false);
+    }
+  };
+
   return (
     <Form {...form}>
       <form onSubmit={form.handleSubmit(handleSubmit)} className="space-y-6">
+        {/* AI 기반 할 일 생성 섹션 */}
+        {!todo && (
+          <div className="space-y-2 p-4 border rounded-lg bg-muted/50">
+            <div className="flex items-center gap-2">
+              <Sparkles className="size-4 text-primary" />
+              <Label className="text-sm font-semibold">AI로 할 일 생성</Label>
+            </div>
+            <div className="flex gap-2">
+              <Input
+                placeholder="예: 내일 오후 3시까지 중요한 팀 회의 준비하기"
+                value={aiInput}
+                onChange={(e) => {
+                  setAiInput(e.target.value);
+                  setAiError(null);
+                }}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" && !e.shiftKey && !isGenerating) {
+                    e.preventDefault();
+                    handleGenerateWithAI();
+                  }
+                }}
+                disabled={isGenerating || isLoading}
+                className="flex-1"
+              />
+              <Button
+                type="button"
+                onClick={handleGenerateWithAI}
+                disabled={isGenerating || isLoading || !aiInput.trim()}
+                variant="default"
+              >
+                {isGenerating ? (
+                  <>
+                    <Loader2 className="mr-2 size-4 animate-spin" />
+                    생성 중...
+                  </>
+                ) : (
+                  <>
+                    <Sparkles className="mr-2 size-4" />
+                    생성
+                  </>
+                )}
+              </Button>
+            </div>
+            {aiError && (
+              <p className="text-sm text-destructive">{aiError}</p>
+            )}
+            <p className="text-xs text-muted-foreground">
+              자연어로 할 일을 입력하면 자동으로 제목, 날짜, 시간, 우선순위, 카테고리를 추출합니다.
+            </p>
+          </div>
+        )}
+
         <FormField
           control={form.control}
           name="title"

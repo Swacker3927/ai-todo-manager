@@ -1,7 +1,22 @@
 "use client";
 
 import * as React from "react";
-import { Sparkles, LogOut, Search, Filter, User } from "lucide-react";
+import { 
+  Sparkles, 
+  LogOut, 
+  Search, 
+  Filter, 
+  User, 
+  TrendingUp, 
+  AlertCircle, 
+  Lightbulb, 
+  CheckCircle2, 
+  Calendar,
+  Target,
+  RefreshCw,
+  Clock,
+  BarChart3
+} from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 
@@ -30,6 +45,16 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
+import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
+import {
+  Card,
+  CardHeader,
+  CardTitle,
+  CardDescription,
+  CardContent,
+} from "@/components/ui/card";
+import { Spinner } from "@/components/ui/spinner";
+import { Progress } from "@/components/ui/progress";
 
 type FilterStatus = "all" | "진행 중" | "완료" | "지연";
 type SortOption = "priority" | "due_date" | "created_date" | "title";
@@ -49,6 +74,27 @@ export default function HomePage() {
   >("all");
   const [sortOption, setSortOption] = React.useState<SortOption>("created_date");
   const [editingTodo, setEditingTodo] = React.useState<Todo | null>(null);
+  
+  // AI 분석 관련 상태
+  type AnalysisData = {
+    summary: string;
+    urgentTasks: string[];
+    insights: string[];
+    recommendations: string[];
+  };
+
+  const [analysisLoading, setAnalysisLoading] = React.useState<{
+    today: boolean;
+    week: boolean;
+  }>({ today: false, week: false });
+  const [analysisData, setAnalysisData] = React.useState<{
+    today: AnalysisData | null;
+    week: AnalysisData | null;
+  }>({ today: null, week: null });
+  const [analysisError, setAnalysisError] = React.useState<{
+    today: string | null;
+    week: string | null;
+  }>({ today: null, week: null });
 
   // 할 일 목록 조회
   const fetchTodos = React.useCallback(async () => {
@@ -335,6 +381,45 @@ export default function HomePage() {
     setEditingTodo(null);
   };
 
+  // AI 분석 요청 함수
+  const handleAnalyzeTodos = async (period: "today" | "week") => {
+    if (!user) return;
+
+    try {
+      setAnalysisLoading((prev) => ({ ...prev, [period]: true }));
+      setAnalysisError((prev) => ({ ...prev, [period]: null }));
+
+      const response = await fetch("/api/analyze-todos", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ period }),
+      });
+
+      const result = await response.json();
+
+      if (!response.ok) {
+        throw new Error(result.error || "분석 중 오류가 발생했습니다.");
+      }
+
+      if (result.success && result.data) {
+        setAnalysisData((prev) => ({ ...prev, [period]: result.data }));
+      } else {
+        throw new Error("분석 결과를 받아오지 못했습니다.");
+      }
+    } catch (err) {
+      console.error("AI 분석 오류:", err);
+      const errorMessage =
+        err instanceof Error
+          ? err.message
+          : "할 일 분석 중 오류가 발생했습니다.";
+      setAnalysisError((prev) => ({ ...prev, [period]: errorMessage }));
+    } finally {
+      setAnalysisLoading((prev) => ({ ...prev, [period]: false }));
+    }
+  };
+
   const handleLogout = async () => {
     try {
       const { error } = await supabase.auth.signOut();
@@ -526,6 +611,388 @@ export default function HomePage() {
                 )}
               </div>
             )}
+          </div>
+
+          {/* AI 요약 및 분석 섹션 */}
+          <div className="space-y-4">
+            <Card>
+              <CardHeader>
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <Sparkles className="size-5 text-primary" />
+                    <CardTitle>AI 요약 및 분석</CardTitle>
+                  </div>
+                </div>
+                <CardDescription>
+                  AI가 할 일 목록을 분석하여 요약과 인사이트를 제공합니다.
+                </CardDescription>
+              </CardHeader>
+              <CardContent>
+                <Tabs defaultValue="today" className="w-full">
+                  <TabsList className="grid w-full grid-cols-2">
+                    <TabsTrigger value="today">오늘의 요약</TabsTrigger>
+                    <TabsTrigger value="week">이번 주 요약</TabsTrigger>
+                  </TabsList>
+                  
+                  <TabsContent value="today" className="mt-4 space-y-4">
+                    {!analysisData.today && !analysisLoading.today && !analysisError.today && (
+                      <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 rounded-lg border bg-card p-4">
+                        <div className="space-y-1">
+                          <p className="text-sm font-medium">오늘의 할 일을 분석합니다</p>
+                          <p className="text-xs text-muted-foreground">
+                            AI가 당일 집중도와 남은 할 일 우선순위를 분석해드립니다.
+                          </p>
+                        </div>
+                        <Button
+                          onClick={() => handleAnalyzeTodos("today")}
+                          disabled={analysisLoading.today}
+                          className="gap-2"
+                        >
+                          <Sparkles className="size-4" />
+                          AI 요약 보기
+                        </Button>
+                      </div>
+                    )}
+
+                    {analysisLoading.today && (
+                      <div className="flex flex-col items-center justify-center gap-4 rounded-lg border bg-card p-12">
+                        <Spinner className="size-8 text-primary" />
+                        <div className="text-center space-y-1">
+                          <p className="text-sm font-medium">AI가 할 일을 분석하고 있습니다</p>
+                          <p className="text-xs text-muted-foreground">잠시만 기다려주세요...</p>
+                        </div>
+                      </div>
+                    )}
+
+                    {analysisError.today && (
+                      <div className="rounded-lg border border-destructive/20 bg-destructive/5 p-4 space-y-3">
+                        <div className="flex items-start gap-3">
+                          <AlertCircle className="size-5 text-destructive shrink-0 mt-0.5" />
+                          <div className="flex-1 space-y-1">
+                            <p className="text-sm font-medium text-destructive">분석 중 오류가 발생했습니다</p>
+                            <p className="text-xs text-destructive/80">{analysisError.today}</p>
+                          </div>
+                        </div>
+                        <Button
+                          onClick={() => handleAnalyzeTodos("today")}
+                          variant="outline"
+                          size="sm"
+                          className="gap-2 w-full sm:w-auto"
+                        >
+                          <RefreshCw className="size-4" />
+                          재시도
+                        </Button>
+                      </div>
+                    )}
+
+                    {analysisData.today && !analysisLoading.today && (
+                      <div className="space-y-6">
+                        {/* 완료율 시각화 */}
+                        <Card>
+                          <CardHeader className="pb-3">
+                            <div className="flex items-center justify-between">
+                              <CardTitle className="text-lg flex items-center gap-2">
+                                <BarChart3 className="size-5 text-primary" />
+                                오늘의 완료율
+                              </CardTitle>
+                            </div>
+                          </CardHeader>
+                          <CardContent className="space-y-4">
+                            <div className="space-y-2">
+                              <div className="flex items-baseline justify-between">
+                                <span className="text-3xl font-bold text-primary">
+                                  {(() => {
+                                    const match = analysisData.today.summary.match(/(\d+(?:\.\d+)?)%/);
+                                    return match ? `${parseFloat(match[1]).toFixed(1)}%` : "0%";
+                                  })()}
+                                </span>
+                                <span className="text-sm text-muted-foreground">완료율</span>
+                              </div>
+                              <Progress
+                                value={(() => {
+                                  const match = analysisData.today.summary.match(/(\d+(?:\.\d+)?)%/);
+                                  return match ? parseFloat(match[1]) : 0;
+                                })()}
+                                className="h-3"
+                              />
+                            </div>
+                            <p className="text-sm text-muted-foreground">
+                              {analysisData.today.summary}
+                            </p>
+                          </CardContent>
+                        </Card>
+
+                        {/* 긴급한 할 일 */}
+                        {analysisData.today.urgentTasks && analysisData.today.urgentTasks.length > 0 && (
+                          <Card className="border-orange-200 dark:border-orange-900 bg-orange-50/50 dark:bg-orange-950/20">
+                            <CardHeader className="pb-3">
+                              <CardTitle className="text-lg flex items-center gap-2">
+                                <AlertCircle className="size-5 text-orange-600 dark:text-orange-400" />
+                                집중해야 할 작업
+                              </CardTitle>
+                            </CardHeader>
+                            <CardContent>
+                              <div className="space-y-2">
+                                {analysisData.today.urgentTasks.map((task: string, idx: number) => (
+                                  <div
+                                    key={idx}
+                                    className="flex items-start gap-3 p-3 rounded-lg bg-background border border-orange-200 dark:border-orange-800"
+                                  >
+                                    <Target className="size-4 text-orange-600 dark:text-orange-400 shrink-0 mt-0.5" />
+                                    <span className="text-sm font-medium">{task}</span>
+                                  </div>
+                                ))}
+                              </div>
+                            </CardContent>
+                          </Card>
+                        )}
+
+                        {/* 인사이트 */}
+                        {analysisData.today.insights && analysisData.today.insights.length > 0 && (
+                          <div className="space-y-3">
+                            <h3 className="text-lg font-semibold flex items-center gap-2">
+                              <Lightbulb className="size-5 text-primary" />
+                              인사이트
+                            </h3>
+                            <div className="grid gap-3 sm:grid-cols-2">
+                              {analysisData.today.insights.map((insight: string, idx: number) => (
+                                <Card key={idx} className="border-l-4 border-l-primary">
+                                  <CardContent className="pt-4">
+                                    <p className="text-sm leading-relaxed">{insight}</p>
+                                  </CardContent>
+                                </Card>
+                              ))}
+                            </div>
+                          </div>
+                        )}
+
+                        {/* 추천 사항 */}
+                        {analysisData.today.recommendations && analysisData.today.recommendations.length > 0 && (
+                          <Card className="border-primary/20 bg-primary/5">
+                            <CardHeader className="pb-3">
+                              <CardTitle className="text-lg flex items-center gap-2">
+                                <CheckCircle2 className="size-5 text-primary" />
+                                실행 가능한 추천
+                              </CardTitle>
+                            </CardHeader>
+                            <CardContent>
+                              <div className="space-y-3">
+                                {analysisData.today.recommendations.map((rec: string, idx: number) => (
+                                  <div
+                                    key={idx}
+                                    className="flex items-start gap-3 p-3 rounded-lg bg-background border"
+                                  >
+                                    <div className="flex items-center justify-center size-6 rounded-full bg-primary/10 text-primary shrink-0 text-xs font-semibold">
+                                      {idx + 1}
+                                    </div>
+                                    <p className="text-sm leading-relaxed flex-1">{rec}</p>
+                                  </div>
+                                ))}
+                              </div>
+                            </CardContent>
+                          </Card>
+                        )}
+
+                        {/* 다시 분석 버튼 */}
+                        <div className="flex justify-end">
+                          <Button
+                            onClick={() => handleAnalyzeTodos("today")}
+                            variant="outline"
+                            size="sm"
+                            className="gap-2"
+                          >
+                            <RefreshCw className="size-4" />
+                            다시 분석하기
+                          </Button>
+                        </div>
+                      </div>
+                    )}
+                  </TabsContent>
+                  
+                  <TabsContent value="week" className="mt-4 space-y-4">
+                    {!analysisData.week && !analysisLoading.week && !analysisError.week && (
+                      <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 rounded-lg border bg-card p-4">
+                        <div className="space-y-1">
+                          <p className="text-sm font-medium">이번 주 전체 할 일을 분석합니다</p>
+                          <p className="text-xs text-muted-foreground">
+                            AI가 주간 패턴 분석 및 다음 주 계획을 제안해드립니다.
+                          </p>
+                        </div>
+                        <Button
+                          onClick={() => handleAnalyzeTodos("week")}
+                          disabled={analysisLoading.week}
+                          className="gap-2"
+                        >
+                          <Sparkles className="size-4" />
+                          AI 요약 보기
+                        </Button>
+                      </div>
+                    )}
+
+                    {analysisLoading.week && (
+                      <div className="flex flex-col items-center justify-center gap-4 rounded-lg border bg-card p-12">
+                        <Spinner className="size-8 text-primary" />
+                        <div className="text-center space-y-1">
+                          <p className="text-sm font-medium">AI가 할 일을 분석하고 있습니다</p>
+                          <p className="text-xs text-muted-foreground">잠시만 기다려주세요...</p>
+                        </div>
+                      </div>
+                    )}
+
+                    {analysisError.week && (
+                      <div className="rounded-lg border border-destructive/20 bg-destructive/5 p-4 space-y-3">
+                        <div className="flex items-start gap-3">
+                          <AlertCircle className="size-5 text-destructive shrink-0 mt-0.5" />
+                          <div className="flex-1 space-y-1">
+                            <p className="text-sm font-medium text-destructive">분석 중 오류가 발생했습니다</p>
+                            <p className="text-xs text-destructive/80">{analysisError.week}</p>
+                          </div>
+                        </div>
+                        <Button
+                          onClick={() => handleAnalyzeTodos("week")}
+                          variant="outline"
+                          size="sm"
+                          className="gap-2 w-full sm:w-auto"
+                        >
+                          <RefreshCw className="size-4" />
+                          재시도
+                        </Button>
+                      </div>
+                    )}
+
+                    {analysisData.week && !analysisLoading.week && (
+                      <div className="space-y-6">
+                        {/* 주간 완료율 및 트랜드 */}
+                        <Card>
+                          <CardHeader className="pb-3">
+                            <div className="flex items-center justify-between">
+                              <CardTitle className="text-lg flex items-center gap-2">
+                                <TrendingUp className="size-5 text-primary" />
+                                주간 완료율
+                              </CardTitle>
+                            </div>
+                          </CardHeader>
+                          <CardContent className="space-y-4">
+                            <div className="space-y-2">
+                              <div className="flex items-baseline justify-between">
+                                <span className="text-3xl font-bold text-primary">
+                                  {(() => {
+                                    const match = analysisData.week.summary.match(/(\d+(?:\.\d+)?)%/);
+                                    return match ? `${parseFloat(match[1]).toFixed(1)}%` : "0%";
+                                  })()}
+                                </span>
+                                <span className="text-sm text-muted-foreground">이번 주 완료율</span>
+                              </div>
+                              <Progress
+                                value={(() => {
+                                  const match = analysisData.week.summary.match(/(\d+(?:\.\d+)?)%/);
+                                  return match ? parseFloat(match[1]) : 0;
+                                })()}
+                                className="h-3"
+                              />
+                            </div>
+                            <p className="text-sm text-muted-foreground">
+                              {analysisData.week.summary}
+                            </p>
+                            {/* 간단한 트랜드 표시 */}
+                            <div className="flex items-center gap-2 pt-2 border-t">
+                              <Clock className="size-4 text-muted-foreground" />
+                              <span className="text-xs text-muted-foreground">
+                                지난 주 대비 완료율 변화가 분석에 포함되었습니다.
+                              </span>
+                            </div>
+                          </CardContent>
+                        </Card>
+
+                        {/* 긴급한 할 일 */}
+                        {analysisData.week.urgentTasks && analysisData.week.urgentTasks.length > 0 && (
+                          <Card className="border-orange-200 dark:border-orange-900 bg-orange-50/50 dark:bg-orange-950/20">
+                            <CardHeader className="pb-3">
+                              <CardTitle className="text-lg flex items-center gap-2">
+                                <AlertCircle className="size-5 text-orange-600 dark:text-orange-400" />
+                                이번 주 긴급한 할 일
+                              </CardTitle>
+                            </CardHeader>
+                            <CardContent>
+                              <div className="space-y-2">
+                                {analysisData.week.urgentTasks.map((task: string, idx: number) => (
+                                  <div
+                                    key={idx}
+                                    className="flex items-start gap-3 p-3 rounded-lg bg-background border border-orange-200 dark:border-orange-800"
+                                  >
+                                    <Target className="size-4 text-orange-600 dark:text-orange-400 shrink-0 mt-0.5" />
+                                    <span className="text-sm font-medium">{task}</span>
+                                  </div>
+                                ))}
+                              </div>
+                            </CardContent>
+                          </Card>
+                        )}
+
+                        {/* 인사이트 */}
+                        {analysisData.week.insights && analysisData.week.insights.length > 0 && (
+                          <div className="space-y-3">
+                            <h3 className="text-lg font-semibold flex items-center gap-2">
+                              <Lightbulb className="size-5 text-primary" />
+                              주간 인사이트
+                            </h3>
+                            <div className="grid gap-3 sm:grid-cols-2">
+                              {analysisData.week.insights.map((insight: string, idx: number) => (
+                                <Card key={idx} className="border-l-4 border-l-primary">
+                                  <CardContent className="pt-4">
+                                    <p className="text-sm leading-relaxed">{insight}</p>
+                                  </CardContent>
+                                </Card>
+                              ))}
+                            </div>
+                          </div>
+                        )}
+
+                        {/* 추천 사항 및 다음 주 계획 */}
+                        {analysisData.week.recommendations && analysisData.week.recommendations.length > 0 && (
+                          <Card className="border-primary/20 bg-primary/5">
+                            <CardHeader className="pb-3">
+                              <CardTitle className="text-lg flex items-center gap-2">
+                                <Calendar className="size-5 text-primary" />
+                                다음 주 계획 제안
+                              </CardTitle>
+                            </CardHeader>
+                            <CardContent>
+                              <div className="space-y-3">
+                                {analysisData.week.recommendations.map((rec: string, idx: number) => (
+                                  <div
+                                    key={idx}
+                                    className="flex items-start gap-3 p-3 rounded-lg bg-background border"
+                                  >
+                                    <div className="flex items-center justify-center size-6 rounded-full bg-primary/10 text-primary shrink-0 text-xs font-semibold">
+                                      {idx + 1}
+                                    </div>
+                                    <p className="text-sm leading-relaxed flex-1">{rec}</p>
+                                  </div>
+                                ))}
+                              </div>
+                            </CardContent>
+                          </Card>
+                        )}
+
+                        {/* 다시 분석 버튼 */}
+                        <div className="flex justify-end">
+                          <Button
+                            onClick={() => handleAnalyzeTodos("week")}
+                            variant="outline"
+                            size="sm"
+                            className="gap-2"
+                          >
+                            <RefreshCw className="size-4" />
+                            다시 분석하기
+                          </Button>
+                        </div>
+                      </div>
+                    )}
+                  </TabsContent>
+                </Tabs>
+              </CardContent>
+            </Card>
           </div>
 
           {/* Main Area */}
