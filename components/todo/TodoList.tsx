@@ -3,7 +3,7 @@
 import * as React from "react";
 import { type Todo } from "@/types/todo";
 import { TodoCard } from "./TodoCard";
-import { Empty } from "@/components/ui/empty";
+import { Empty, EmptyTitle, EmptyDescription } from "@/components/ui/empty";
 
 interface TodoListProps {
   todos: Todo[];
@@ -22,11 +22,10 @@ export function TodoList({
 }: TodoListProps) {
   if (todos.length === 0) {
     return (
-      <Empty
-        title="할 일이 없습니다"
-        description={emptyMessage}
-        className="py-12"
-      />
+      <Empty className="py-12">
+        <EmptyTitle>할 일이 없습니다</EmptyTitle>
+        <EmptyDescription>{emptyMessage}</EmptyDescription>
+      </Empty>
     );
   }
 
